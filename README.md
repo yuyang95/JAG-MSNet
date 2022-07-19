@@ -1,5 +1,10 @@
-This is the implementation of article: "Multi-stage convolutional autoencoder network for hyperspectral unmixing".
+This is the implementation of article: **"Multi-stage convolutional autoencoder network for hyperspectral unmixing"**.
 
-Citation
+**Citation**
+
 If you use this code, please cite:
+
+**Usage**
+
+Run MSPNet_demp.py
 
