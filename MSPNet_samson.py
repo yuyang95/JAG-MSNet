@@ -11,19 +11,7 @@ import matplotlib.pyplot as plt
 import matplotlib as mpl
 import torch.nn.functional as F
 import torchvision.transforms as transforms
-import time
 
-start = time.time()
-
-# batch_size = 1
-# EPOCH = 200
-
-# alpha = 0.4
-# beta = 0.04
-# drop_out = 0.4
-# learning_rate = 0.02
-# # sp = EPOCH // 30
-# sp = 40
 
 seed = 1234
 random.seed(seed)
@@ -35,7 +23,7 @@ device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 # os.environ["KMP_DUPLICATE_LIB_OK"]="TRUE"
 # Load DATA
-data = sio.loadmat("urban5.mat")
+data = sio.loadmat("samson_dataset.mat")
 
 abundance_GT = torch.from_numpy(data["A"])  # true abundance
 original_HSI = torch.from_numpy(data["Y"])  # mixed abundance
@@ -50,7 +38,7 @@ GT_init = torch.from_numpy(GT_endmember).unsqueeze(2).unsqueeze(3).float()
 band_Number = original_HSI.shape[0]
 endmember_number, pixel_number = abundance_GT.shape
 
-col = 307
+col = 95
 
 original_HSI = torch.reshape(original_HSI, (band_Number, col, col))
 abundance_GT = torch.reshape(abundance_GT, (endmember_number, col, col))
@@ -58,17 +46,19 @@ abundance_GT = torch.reshape(abundance_GT, (endmember_number, col, col))
 batch_size = 1
 EPOCH = 800
 
-alpha = 0.4
+alpha = 0.1
 beta = 0.03
 drop_out = 0.2
-learning_rate = 0.02
+learning_rate = 0.03
+
+
 
 
 
 class CharbonnierLoss(nn.Module):
     """Charbonnier Loss (L1)"""
 
-    def __init__(self, eps=1e-4):
+    def __init__(self, eps=1e-3):
         super(CharbonnierLoss, self).__init__()
         self.eps = eps
 
@@ -82,7 +72,7 @@ class EdgeLoss(nn.Module):
     def __init__(self):
         super(EdgeLoss, self).__init__()
         k = torch.Tensor([[.05, .25, .4, .25, .05]])
-        self.kernel = torch.matmul(k.t(),k).unsqueeze(0).repeat(5,1,1,1)
+        self.kernel = torch.matmul(k.t(),k).unsqueeze(0).repeat(3,1,1,1)
         if torch.cuda.is_available():
             self.kernel = self.kernel.cuda()
         self.loss = CharbonnierLoss()
@@ -180,13 +170,11 @@ def arange_A_E(abundance_input, abundance_GT_input, endmember_input, endmember_G
         RMSE_index, :, :
     ]
     endmember_input[:, np.arange(endmember_number)] = endmember_input[:, SAD_index]
-    print(RMSE_matrix)
-    print(SAD_matrix)
 
     return abundance_input, endmember_input, RMSE_abundance, SAD_endmember
 
 
-class MyTrainData(torch.utils.data.Dataset):
+class load_data(torch.utils.data.Dataset):
     def __init__(self, img, gt, transform=None):
         self.img = img.float()
         self.gt = gt.float()
@@ -214,8 +202,7 @@ def conv11(inchannel, outchannel):
 
 
 def transconv11(inchannel,outchannel):
-    
-    return nn.Conv2d(inchannel, outchannel, kernel_size=1,stride=1,bias=True)
+    return nn.Conv2d(inchannel, outchannel, kernel_size=1,stride=1)
 
 
 # calculate SAD of endmember
@@ -231,54 +218,47 @@ class multiStageUnmixing(nn.Module):
         super(multiStageUnmixing, self).__init__()
         self.layer1 = nn.Sequential(
             conv33(band_Number + endmember_number, 96),
-            nn.LeakyReLU(0.85),
+            nn.LeakyReLU(0.2),
             nn.BatchNorm2d(96),
             nn.Dropout(drop_out),
             conv33(96, 48),
-            nn.LeakyReLU(0.85),
+            nn.LeakyReLU(0.2),
             nn.BatchNorm2d(48),
             nn.Dropout(drop_out),
             conv33(48, endmember_number),
-            # nn.LeakyReLU(0.85),
-            # nn.BatchNorm2d(endmember_number),
-            # nn.Dropout(drop_out),
         )
         self.downsampling22 = nn.AvgPool2d(2, 2,ceil_mode =True)
         self.downsampling44 = nn.AvgPool2d(4, 4,ceil_mode =True)
         self.layer2 = nn.Sequential(
             conv33(band_Number + endmember_number, 96),
-            nn.LeakyReLU(0.85),
+            nn.LeakyReLU(0.2),
             nn.BatchNorm2d(96),
             nn.Dropout(drop_out),
             conv33(96, 48),
-            nn.LeakyReLU(0.85),
+            nn.LeakyReLU(0.2),
             nn.BatchNorm2d(48),
             nn.Dropout(drop_out),
             conv33(48, endmember_number),
-            # nn.LeakyReLU(0.85),
-            # nn.BatchNorm2d(endmember_number),
-            # nn.Dropout(drop_out),
         )
 
         self.layer3 = nn.Sequential(
             conv33(band_Number, 96),
-            nn.LeakyReLU(0.85),
+            nn.LeakyReLU(0.2),
             nn.BatchNorm2d(96),
             nn.Dropout(drop_out),
             conv33(96, 48),
-            nn.LeakyReLU(0.85),
+            nn.LeakyReLU(0.2),
             nn.BatchNorm2d(48),
             nn.Dropout(drop_out),
             conv33(48, endmember_number),
-            # nn.LeakyReLU(0.8),
-            # nn.BatchNorm2d(endmember_number),
-            # nn.Dropout(drop_out),
         )
 
 
 
         self.encodelayer = nn.Sequential(nn.Softmax())
         self.transconv = transconv11(endmember_number,endmember_number)
+        self.transconv2 = transconv11(band_Number,band_Number)
+
         self.decoderlayer4 = nn.Sequential(
             nn.Conv2d(
                 in_channels=endmember_number,
@@ -310,26 +290,30 @@ class multiStageUnmixing(nn.Module):
         #layer3
         downsampling44 = self.downsampling44(x)
         layer3out = self.layer3(downsampling44)
-        translayer3 = nn.functional.interpolate(layer3out, (154, 154), mode="bilinear")
-        translayer3 = self.transconv(translayer3)
 
         en_result3 = self.encodelayer(layer3out)
         de_result3 = self.decoderlayer6(en_result3)
 
+        translayer3 = nn.functional.interpolate(layer3out, (48, 48), mode="bilinear")
+        translayer3 = self.transconv(translayer3)
 
         #layer2
         downsampling22 = self.downsampling22(x)
-        layer2out = torch.cat((downsampling22, translayer3), 1)
+        convlayer2 = self.transconv2(downsampling22)
+        layer2out = torch.cat((convlayer2, translayer3), 1)
         layer2out = self.layer2(layer2out)
         en_result2 = self.encodelayer(layer2out)
         de_result2 = self.decoderlayer5(en_result2)
 
-
         #layer1
         translayer2 = nn.functional.interpolate(layer2out, (col, col), mode="bilinear")
         translayer2 = self.transconv(translayer2)
-        layer1out = torch.cat((x, translayer2), 1)
+        convlayer1 = self.transconv2(x)
+        layer1out = torch.cat((convlayer1, translayer2), 1)
         layer1out = self.layer1(layer1out)
+
+
+        #layer1out
         en_result1 = self.encodelayer(layer1out)
         de_result1 = self.decoderlayer4(en_result1)
 
@@ -366,10 +350,8 @@ def weights_init(m):
 
 
 
-
-
 # load data
-train_dataset = MyTrainData(
+train_dataset = load_data(
     img=original_HSI, gt=abundance_GT, transform=transforms.ToTensor()
 )
 # Data loader
@@ -379,7 +361,6 @@ train_loader = torch.utils.data.DataLoader(
 
 net = multiStageUnmixing().cuda()
 edgeLoss = EdgeLoss()
-chabloss = CharbonnierLoss()
 # weight init
 net.apply(weights_init)
 
@@ -393,7 +374,7 @@ net.load_state_dict(model_dict)
 
 # optimizer
 optimizer = torch.optim.Adam(net.parameters(), lr=learning_rate, weight_decay=1e-3)
-scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=40, gamma=0.3)
+scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=30, gamma=0.6)
 
 
 # train
@@ -412,8 +393,8 @@ for epoch in range(EPOCH):
         abundanceLoss3 = reconstruction_SADloss(x3, reconstruction_result3)
 
         MSELoss = MSE(x, reconstruction_result)
-        MSELoss2 = mMSELoss = MSE(x2, reconstruction_result2)
-        MSELoss3 = mMSELoss = MSE(x3, reconstruction_result3)
+        MSELoss2 = MSE(x2, reconstruction_result2)
+        MSELoss3 = MSE(x3, reconstruction_result3)
 
         edge1 = edgeLoss(en_abundance2, en_abundance3)
         edge2 = edgeLoss(en_abundance, en_abundance2)
@@ -423,7 +404,6 @@ for epoch in range(EPOCH):
         CLoss = edge1 + edge2
 
         total_loss = ALoss + (alpha * BLoss) + (beta * CLoss)
-        # total_loss = abundanceLoss
         optimizer.zero_grad()
 
         total_loss.backward()
@@ -436,7 +416,6 @@ for epoch in range(EPOCH):
                 epoch,
                 "| loss: %.4f" % total_loss.cpu().data.numpy(),
             )
-
 
 
 net.eval()
@@ -457,11 +436,7 @@ print("RMSE", RMSE_abundance)
 print("mean_RMSE", RMSE_abundance.mean())
 print("endmember_SAD", SAD_endmember)
 print("mean_SAD", SAD_endmember.mean())
-
-end = time.time()
-
-print(end - start)
-# sio.savemat('./urban/urban.mat',{'A':en_abundance,'E':decoder_para})
+# sio.savemat('./samson/samson.mat',{'A':en_abundance,'E':decoder_para})
 
 # plot_abundance(en_abundance, abundance_GT)
 # plot_endmember(decoder_para, GT_endmember)
