@@ -14,6 +14,7 @@ Run MSNet_samson.py
 If you want to run the code in your own data, you can accordingly change the input and change the parameters.
 
 The format of input:
+
 A represents the ground truth of abundance.
 
 M represents the ground truth of endmembers.
