@@ -22,4 +22,3 @@ M1 represents the initialization of endmembers by VCA.
 
 Y represents the HSI.
 
-**If you have any questions, please don't hesitate to contact us: yuyang1995@whu.edu.cn**
